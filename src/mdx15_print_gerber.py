@@ -51,7 +51,7 @@ class GCode2RmlConverter:
 	feedspeedfactor = 1.0
 
 	def __init__(self,offset_x,offset_y,feedspeedfactor):
-		self.moveCommandParseRegex = re.compile(r'G0([01])\s(X([-+]?\d*\.*\d+))?(Y([-+]?\d*\.*\d+))?(Z([-+]?\d*\.*\d+))?')
+		self.moveCommandParseRegex = re.compile(r'G0([01])\s(X([-+]?\d*\.*\d+\s*))?(Y([-+]?\d*\.*\d+\s*))?(Z([-+]?\d*\.*\d+\s*))?')
 		self.offset_x = offset_x
 		self.offset_y = offset_y
 		self.feedspeedfactor = feedspeedfactor
@@ -75,6 +75,8 @@ class GCode2RmlConverter:
 		#print('cmd: '+line)
 		if line == None or len(line) == 0 :
 			pass # empty line
+		elif line.startswith('(') :
+			pass # comment line
 		elif line == 'G20' : # units as inches
 			self.inputConversionFactor = 25.4
 		elif line == 'G21' : # units as mm
@@ -86,7 +88,10 @@ class GCode2RmlConverter:
 		elif line == 'M03' : # spindle on
 			pass
 		elif line == 'M05' : # spindle off
+			outputCommands.append('^DF;!MC0;')
 			outputCommands.append('H')
+		elif line.startswith('G01 F'): # in flatcam 2018, the feed rate is set in a move command
+			self.feedrate = float(line[5:]) 
 		elif line.startswith('G00') or line.startswith('G01'): # move
 			outputCommands.extend( self.processMoveCommand(line) )	
 		elif line.startswith('G4 P'): # dwell
@@ -94,7 +99,6 @@ class GCode2RmlConverter:
 			outputCommands.append('W {}'.format( dwelltime ) )
 		elif line.startswith('F'): # feed rate
 			self.feedrate = float(line[1:]) 
-			pass
 		# ...
 		else :
 			print('Unrecognized command: ' + line)
