@@ -4,7 +4,6 @@
 # Note: Uses RawFileToPrinter.exe as found at http://www.columbia.edu/~em36/windowsrawprint.html
 # Note: Might work with other Roland Modela Models (MDX-20), but I don't have access to such machines, so I cannot test.
 #
-# TODO: Handle the gcode exported by FlactCam 2018 (development)
 #
 # MIT License
 #
