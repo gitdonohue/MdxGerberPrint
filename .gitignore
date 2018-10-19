@@ -2,3 +2,5 @@ src/build/
 src/__pycache__/
 
 *.spec
+*.prn
+*.gcode

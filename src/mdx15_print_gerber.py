@@ -137,12 +137,15 @@ class GCode2RmlConverter:
 
 class ModelaZeroControl:
 	# Constants
-	XY_INCREMENTS = 50
-	XY_INCREMENTS_LARGE= 250
+	XY_INCREMENTS = 1
+	XY_INCREMENTS_LARGE= 100
 	Z_INCREMENTS = 1
 	Z_INCREMENTS_MED = 10
 	Z_INCREMENTS_LARGE = 100
 	Z_DEFAULT_OFFSET = -1300.0
+
+	Y_MAX = 4064.0
+	X_MAX = 6096.0
 
 	comport = None
 	ser = None
@@ -182,8 +185,10 @@ class ModelaZeroControl:
 
 	def sendMoveCommand(self):
 		if self.x < 0.0 : self.x = 0.0
+		if self.x > self.X_MAX : self.x = self.X_MAX 
 		if self.y < 0.0 : self.y = 0.0
-		#print('Moving to {:.3f},{:.3f},{:.3f}'.format(self.x,self.y,self.z))
+		if self.y > self.Y_MAX : self.y = self.Y_MAX
+		print('Moving to {:.3f},{:.3f},{:.3f}'.format(self.x,self.y,self.z))
 		spindle = '1' if self.spindleEnabled else '0'
 		# The esoteric syntax was borrowed from https://github.com/Craftweeks/MDX-LabPanel
 		self.sendCommand('^DF;!MC{0};!PZ0,0;V15.0;Z{1:.3f},{2:.3f},{3:.3f};!MC{0};;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;'.format(spindle,self.x,self.y,self.z))
@@ -226,8 +231,9 @@ class ModelaZeroControl:
 				 self.sendCommand('^DF;!MC0;H')
 
 			elif c == 'z' :
-				 self.x = 0.0
-				 self.y = 0.0
+				 #self.x = 0.0
+				 #self.y = 0.0
+				 (self.x,self.y) = self.xy_zero
 				 self.z = 0.0
 				 self.sendMoveCommand()
 
