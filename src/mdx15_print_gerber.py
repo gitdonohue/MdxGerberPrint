@@ -147,7 +147,6 @@ class GCode2RmlConverter:
 					self.backlash_compensation_x = 0.0 if deltaX > 0 else -self.backlashX
 					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
 				self.last_displacement_x = deltaX;
-		self.last_x = self.X
 
 		# Backlash handling in Y
 		if abs(self.backlashY) > self.epsilon :
@@ -158,7 +157,6 @@ class GCode2RmlConverter:
 					self.backlash_compensation_y = 0.0 if deltaY > 0 else -self.backlashY
 					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
 				self.last_displacement_y = deltaY;
-		self.last_y = self.Y
 
 		# Backlash handling in Z
 		if abs(self.backlashZ) > self.epsilon :
@@ -169,6 +167,9 @@ class GCode2RmlConverter:
 					self.backlash_compensation_z = 0.0 if deltaZ > 0 else -self.backlashZ
 					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
 				self.last_displacement_z = deltaZ;
+				
+		self.last_x = self.X		
+		self.last_y = self.Y
 		self.last_z = self.Z
 
 		# Send move command
