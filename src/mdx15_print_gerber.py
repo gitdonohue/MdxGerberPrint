@@ -49,11 +49,29 @@ class GCode2RmlConverter:
 	offset_y = 0.0
 	feedspeedfactor = 1.0
 
-	def __init__(self,offset_x,offset_y,feedspeedfactor):
+	# Backlash compensation related
+	backlashX = 0
+	backlashY = 0
+	backlashZ = 0
+	last_x = 0
+	last_y = 0
+	last_z = 0
+	last_displacement_x = 0.0
+	last_displacement_y = 0.0
+	last_displacement_z = 0.0
+	backlash_compensation_x = 0.0
+	backlash_compensation_y = 0.0
+	backlash_compensation_z = 0.0
+	epsilon = 0.001
+
+	def __init__(self,offset_x,offset_y,feedspeedfactor,backlashX,backlashY,backlashZ):
 		self.moveCommandParseRegex = re.compile(r'G0([01])\s(X([-+]?\d*\.*\d+\s*))?(Y([-+]?\d*\.*\d+\s*))?(Z([-+]?\d*\.*\d+\s*))?')
 		self.offset_x = offset_x
 		self.offset_y = offset_y
 		self.feedspeedfactor = feedspeedfactor
+		self.backlashX = backlashX
+		self.backlashY = backlashY
+		self.backlashZ = backlashZ
 
 	def digestStream(self, lineIterator):
 		outputCommands = []
@@ -119,7 +137,42 @@ class GCode2RmlConverter:
 		if g.group(7) != None : self.Z = float(g.group(7)) * self.inputConversionFactor
 		#outputScale = 1 / 0.01
 		outputScale = 1 / 0.025
-		outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.X*outputScale+self.offset_x,self.Y*outputScale+self.offset_y,self.Z*outputScale))
+		
+		# Backlash handling in X
+		if abs(self.backlashX) > self.epsilon :
+			deltaX = self.X - self.last_x 
+			if abs(deltaX) > self.epsilon : # non-zero move in that axis
+				if deltaX * self.last_displacement_x < 0 : # direction changed
+					# move to last position with offset in new move dir
+					self.backlash_compensation_x = 0.0 if deltaX > 0 else -self.backlashX
+					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+				self.last_displacement_x = deltaX;
+		self.last_x = self.X
+
+		# Backlash handling in Y
+		if abs(self.backlashY) > self.epsilon :
+			deltaY = self.Y - self.last_y 
+			if abs(deltaY) > self.epsilon : # non-zero move in that axis
+				if deltaY * self.last_displacement_y < 0 : # direction changed
+					# move to last position with offset in new move dir
+					self.backlash_compensation_y = 0.0 if deltaY > 0 else -self.backlashY
+					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+				self.last_displacement_y = deltaY;
+		self.last_y = self.Y
+
+		# Backlash handling in Z
+		if abs(self.backlashZ) > self.epsilon :
+			deltaZ = self.Z - self.last_z 
+			if abs(deltaZ) > self.epsilon : # non-zero move in that axis
+				if deltaZ * self.last_displacement_z < 0 : # direction changed
+					# move to last position with offset in new move dir
+					self.backlash_compensation_z = 0.0 if deltaZ > 0 else -self.backlashZ
+					outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+				self.last_displacement_z = deltaZ;
+		self.last_z = self.Z
+
+		# Send move command
+		outputCommands.append('Z {:.3f},{:.3f},{:.3f}'.format(self.X*outputScale+self.offset_x+self.backlash_compensation_x, self.Y*outputScale+self.offset_y+self.backlash_compensation_y, self.Z*outputScale+self.backlash_compensation_z))
 		return outputCommands
 
 	def convertFile(self,infile,outfile):
@@ -326,39 +379,46 @@ def main():
 	parser.add_option("-p", '--print', dest='print', action="store_true", default=False, help='Prints the RML-1 data.')
 	parser.add_option('-n', '--printerName', dest='printerName', default='Roland MODELA MDX-15', help='The windows printer name. (Default: Roland MODELA MDX-15)')
 	parser.add_option('-f', '--feedspeedfactor', dest='feedspeedfactor', default=1.0, help='Feed rate scaling factor (Default: 1.0)')
+	parser.add_option('--backlashX', dest='backlashX', default=0.0, help='Backlash compensation in X direction (in steps).')
+	parser.add_option('--backlashY', dest='backlashY', default=0.0, help='Backlash compensation in y direction (in steps).')
+	parser.add_option('--backlashZ', dest='backlashZ', default=0.0, help='Backlash compensation in z direction (in steps).')
 	(options,args) = parser.parse_args()
 	#print(options)
 
 	serialport = ''
-	import subprocess
-	shelloutput = subprocess.check_output('powershell -Command "(Get-WmiObject Win32_Printer -Filter \\"Name=\'{}\'\\").PortName"'.format(options.printerName))
-	if len(shelloutput)>0 :
-		try :
-			serialport = shelloutput.decode('utf-8').split(':')[0]
-			print( 'Found {} on {}'.format(options.printerName,serialport) )
-		except:
-			print('Error parsing com port: ' + str(shelloutput) )
-	else :
-		print('Could not find the printer driver for: ' + options.printerName)
-		sys.exit(1)
+	if options.zero : # Printer driver is only required if we want to set the zero
+		import subprocess
+		shelloutput = subprocess.check_output('powershell -Command "(Get-WmiObject Win32_Printer -Filter \\"Name=\'{}\'\\").PortName"'.format(options.printerName))
+		if len(shelloutput)>0 :
+			try :
+				serialport = shelloutput.decode('utf-8').split(':')[0]
+				print( 'Found {} printer driver ({})'.format(options.printerName,serialport) )
+			except:
+				print('Error parsing com port: ' + str(shelloutput) )
+		else :
+			print('Could not find the printer driver for: ' + options.printerName)
+			sys.exit(1)
 
 	x_offset = 0.0
 	y_offset = 0.0
 	if options.zero :
-		print('Setting Zero')
 		modelaZeroControl = ModelaZeroControl(serialport)
-		(x_offset,y_offset) = modelaZeroControl.run()
+		if modelaZeroControl.connected :
+			print('Setting Zero')
+			(x_offset,y_offset) = modelaZeroControl.run()
 
-		print('Would you like to set the current position as the Zero (y/n)?')
-		c = msvcrt.getwch()
-		if c == 'y' or c == 'Y' :
-			(x_offset,y_offset) = modelaZeroControl.setZeroHere()
+			print('Would you like to set the current position as the Zero (y/n)?')
+			c = msvcrt.getwch()
+			if c == 'y' or c == 'Y' :
+				(x_offset,y_offset) = modelaZeroControl.setZeroHere()
+		else :
+			print('Could not connect to the printer to set the zero.')
 
 
 	if options.infile != '' :
 		if options.outfile == '' : options.outfile = options.infile + '.prn'
 		print('Converting {} to {}'.format(options.infile,options.outfile))
-		converter = GCode2RmlConverter(x_offset, y_offset, float(options.feedspeedfactor))
+		converter = GCode2RmlConverter(x_offset, y_offset, float(options.feedspeedfactor), float(options.backlashX), float(options.backlashY), float(options.backlashZ) )
 		converter.convertFile( options.infile, options.outfile )
 
 	if options.print :
