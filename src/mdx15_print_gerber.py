@@ -148,6 +148,7 @@ class GCode2RmlConverter:
 		outputScale = 1 / 0.025
 
 		# Z height correction
+		z_correction = 0.0
 		if self.levelingData != None :
 			n = len( self.levelingData[0] )
 			px = self.X*outputScale+self.offset_x
@@ -156,17 +157,18 @@ class GCode2RmlConverter:
 			# Find quadrant in which point lies
 			i = 0
 			j = 0
-			while i < (n-1) :
-				if px >= self.levelingData[i][j][0] and px >= self.levelingData[i+1][j][0] : break
+			while i < (n-2) :
+				if px >= (self.levelingData[i][j][0]-self.epsilon) and px < self.levelingData[i+1][j][0] : break
 				i = i+1
-			while j < (n-1) :
-				if py >= self.levelingData[i][j][1] and py >= self.levelingData[i][j+1][1] : break
+			while j < (n-2) :
+				if py >= (self.levelingData[i][j][1]-self.epsilon) and py < self.levelingData[i][j+1][1] : break
 				j = j+1
 
 			# interpolate values
+			
 			px0 = self.levelingData[i][j][0]
 			px1 = self.levelingData[i+1][j][0]
-			fx = (px1 - px) / (px1 - px0)
+			fx = (px - px0) / (px1 - px0)
 			h00 = self.levelingData[i][j][2]
 			h10 = self.levelingData[i+1][j][2]
 			h0 = h00 + (h10 - h00) * fx
@@ -175,11 +177,12 @@ class GCode2RmlConverter:
 			h1 = h01 + (h11 - h01) * fx
 			py0 = self.levelingData[i][j][1]
 			py1 = self.levelingData[i][j+1][1]
-			fy = (py1 - py) / (py1 - py0)
+			fy = (py - py0) / (py1 - py0)
 			h = h0 + (h1 - h0) * fy
-			
+			#print(px,py,i,j,fx,fy,self.Z,h,h/outputScale)
+			z_correction = -h
 			# Apply compensation to Z
-			self.Z = self.Z + h/self.outputScale	
+			#self.Z = self.Z - h/outputScale	
 
 		# Backlash handling in X
 		if abs(self.backlashX) > self.epsilon :
@@ -188,7 +191,7 @@ class GCode2RmlConverter:
 				if deltaX * self.last_displacement_x < 0 : # direction changed
 					# move to last position with offset in new move dir
 					self.backlash_compensation_x = 0.0 if deltaX > 0 else -self.backlashX
-					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z)+z_correction)
 				self.last_displacement_x = deltaX;
 
 		# Backlash handling in Y
@@ -198,7 +201,7 @@ class GCode2RmlConverter:
 				if deltaY * self.last_displacement_y < 0 : # direction changed
 					# move to last position with offset in new move dir
 					self.backlash_compensation_y = 0.0 if deltaY > 0 else -self.backlashY
-					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z+z_correction))
 				self.last_displacement_y = deltaY;
 
 		# Backlash handling in Z
@@ -208,7 +211,7 @@ class GCode2RmlConverter:
 				if deltaZ * self.last_displacement_z < 0 : # direction changed
 					# move to last position with offset in new move dir
 					self.backlash_compensation_z = 0.0 if deltaZ > 0 else -self.backlashZ
-					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z))
+					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_+z_correction))
 				self.last_displacement_z = deltaZ;
 
 		self.last_x = self.X		
@@ -216,7 +219,7 @@ class GCode2RmlConverter:
 		self.last_z = self.Z
 
 		# Send move command
-		outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.X*outputScale+self.offset_x+self.backlash_compensation_x, self.Y*outputScale+self.offset_y+self.backlash_compensation_y, self.Z*outputScale+self.backlash_compensation_z))
+		outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.X*outputScale+self.offset_x+self.backlash_compensation_x, self.Y*outputScale+self.offset_y+self.backlash_compensation_y, self.Z*outputScale+self.backlash_compensation_z+z_correction))
 		return outputCommands
 
 	def convertFile(self,infile,outfile):
@@ -445,7 +448,7 @@ class ModelaZeroControl:
 		self.z = z
 		self.sendMoveCommand(wait)
 
-	def getAutolevelingData(self, cam, steps=2, heightpoints=40) :
+	def getAutolevelingData(self, cam, steps=1, heightpoints=50) :
 		if self.microscope_leveling_startpoint != None and  self.microscope_leveling_endpoint != None :
 			print(self.microscope_leveling_startpoint,self.microscope_leveling_endpoint)
 			(x1,y1,z1) = self.microscope_leveling_startpoint
@@ -481,6 +484,8 @@ class ModelaZeroControl:
 						#print(focusValues)
 						maxrank = numpy.argmax(focusValues)
 
+						self.moveTo(px,py,startingHeight-maxrank*1.0,wait=True)
+
 						# # TODO: Find max focus height position using curve fit 
 						# poly_rank = 7
 						# focusValues_indexes = range(len(focusValues))
@@ -490,7 +495,7 @@ class ModelaZeroControl:
 						# maxrank = ( maxrank_high / (numpts-1) ) * steps
 						# print(px,py,maxrank_high,maxrank)
 						
-						heights[i][j] = ( px,px, maxrank)
+						heights[i][j] = ( px,py, maxrank)
 
 			except KeyboardInterrupt :
 				print('Leveling cancelled...')
@@ -683,6 +688,12 @@ def main():
 				print('4) Press both the UP and Down buttons on the printer.')
 				print('5) When VIEW light stops blinking, press the VIEW butotn.')
 				print('6) Plug the usb cable back in.')
+
+				if mic != None and mic.isConnected() :
+					print('Press any key to exit.')
+					msvcrt.getwch()
+
+
 			else :
 				print('Error: No file to be printed.')
 
