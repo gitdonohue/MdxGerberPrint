@@ -151,8 +151,8 @@ class GCode2RmlConverter:
 		z_correction = 0.0
 		if self.levelingData != None :
 			n = len( self.levelingData[0] )
-			px = self.X*outputScale+self.offset_x
-			py = self.Y*outputScale+self.offset_y
+			px = self.X*outputScale #+self.offset_x
+			py = self.Y*outputScale #+self.offset_y
 
 			# Find quadrant in which point lies
 			i = 0
@@ -191,7 +191,7 @@ class GCode2RmlConverter:
 				if deltaX * self.last_displacement_x < 0 : # direction changed
 					# move to last position with offset in new move dir
 					self.backlash_compensation_x = 0.0 if deltaX > 0 else -self.backlashX
-					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z)+z_correction)
+					outputCommands.append('Z {:.0f},{:.0f},{:.0f}'.format(self.last_x*outputScale+self.offset_x+self.backlash_compensation_x,self.last_y*outputScale+self.offset_y+self.backlash_compensation_y,self.last_z*outputScale+self.backlash_compensation_z+z_correction))
 				self.last_displacement_x = deltaX;
 
 		# Backlash handling in Y
@@ -263,6 +263,8 @@ class ModelaZeroControl:
 	microscope_leveling_endpoint = None
 
 	connected = False
+
+	xy_zero = (0.0,0.0)
 
 	def __init__(self,comport):
 		self.comport = comport
@@ -448,7 +450,7 @@ class ModelaZeroControl:
 		self.z = z
 		self.sendMoveCommand(wait)
 
-	def getAutolevelingData(self, cam, steps=1, heightpoints=50) :
+	def getAutolevelingData(self, cam, steps=2, heightpoints=50) :
 		if self.microscope_leveling_startpoint != None and  self.microscope_leveling_endpoint != None :
 			print(self.microscope_leveling_startpoint,self.microscope_leveling_endpoint)
 			(x1,y1,z1) = self.microscope_leveling_startpoint
@@ -465,8 +467,8 @@ class ModelaZeroControl:
 				for i in range(steps+1) :
 					for j in range(steps+1) :
 						#print(i,j)
-						fx = float(i) / (steps+1)
-						fy = float(j) / (steps+1)
+						fx = float(i) / (steps)
+						fy = float(j) / (steps)
 						px = x1 + (x2-x1) * fx
 						py = y1 + (y2-y1) * fy 
 						#print(px,py)
@@ -501,11 +503,13 @@ class ModelaZeroControl:
 				print('Leveling cancelled...')
 				return None
 
-			# Bias results relative to initial point
-			(x,y,home_rank) = heights[0][0]
+			# Bias results relative to initial point, at origin
+			(x0,y0,home_rank) = heights[0][0]
 			for i in range(steps+1) :
 					for j in range(steps+1) :
 						(x,y,r) = heights[i][j]
+						x = x - x0
+						y = y - y0
 						r = r - home_rank
 						heights[i][j] = (x,y,r)
 
