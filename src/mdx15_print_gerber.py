@@ -263,6 +263,8 @@ class ModelaZeroControl:
 	microscope_leveling_endpoint = None
 
 	connected = False
+	hasZeroBeenSet = False
+	exitRequested = False
 
 	xy_zero = (0.0,0.0)
 
@@ -321,13 +323,14 @@ class ModelaZeroControl:
 		print('If the green light next to the VIEW button is lit, please press the VIEW button.')
 		print('Usage:')
 		print('\th - send to home')
-		print('\tz - send to zero')	
+		print('\tz - Set Z zero')		
+		print('\tZ - send to zero')	
 		print('\twasd - move on the XY plane (+shift for small increments)')
 		print('\tup/down - move in the Z axis (+CTRL for medium increments, +ALT for large increments)')
-		print('\tZ - Set Z zero')
 		print('\t1 - Set Microscope-based levelling starting point')
 		print('\t2 - Set Microscope-based levelling ending point')
-		print('\tq/ESC - Quit')
+		print('\tq - Quit and move to next step.')
+		print('\tCTRL-C / ESC - Exit program.')
 
 		self.sendCommand('^IN;!MC0;H') # clear errors, disable spindle, return home
 		self.z_offset = self.Z_DEFAULT_OFFSET
@@ -348,16 +351,19 @@ class ModelaZeroControl:
 				n = ord(c)
 				#print(c,n)
 
-			if ( c == 'q' and n == 0 ) or ord(c) == 3 or ord(c) == 27 :
+			if ( c == 'q' and n == 0 ) :
+				if not self.hasZeroBeenSet :
+					print('Would you like to set the current position as the Zero (y/n)?')
+					c = msvcrt.getwch()
+					if c == 'y' or c == 'Y' :
+						self.setZeroHere()
 				print('Done') 
 				return self.xy_zero
 
 			elif c == 'h' :
 				 self.sendCommand('^DF;!MC0;H')
 
-			elif c == 'z' :
-				 #self.x = 0.0
-				 #self.y = 0.0
+			elif c == 'Z' :
 				 (self.x,self.y) = self.xy_zero
 				 self.z = 0.0
 				 self.sendMoveCommand(True)
@@ -407,13 +413,8 @@ class ModelaZeroControl:
 				self.z -= self.Z_INCREMENTS_LARGE
 				self.sendMoveCommand()
 
-			elif c == 'Z' and n == 0 :
-				# Set Z zero to current position
-				print('Setting zero')
-				self.z_offset = self.z_offset + self.z
-				self.z = 0.0
-				self.sendCommand('^DF;!ZO{:.3f};;'.format(self.z_offset)) # set z zero to current
-				self.xy_zero = (self.x,self.y)
+			elif c == 'z' and n == 0 :
+				self.setZeroHere()
 
 			elif n == 75 : # left arrow
 				#self.sendCommand('^DF;!MC0;') # disable spindle
@@ -430,11 +431,18 @@ class ModelaZeroControl:
 			elif c == '2' :
 				self.microscope_leveling_endpoint = (self.x,self.y,self.z)
 				print('Setting leveling point 2 ({:.3f},{:.3f},{:.3f})'.format(self.x,self.y,self.z))
+
+			elif ord(c) == 27 : # Esc
+				self.exitRequested = True
+				return self.xy_zero
+			elif ord(c) == 3 : # CTRL-C
+				self.exitRequested = True
+				return self.xy_zero
 			else :
 				#print( 'you entered: ' + str(n if n != 0 else ord(c) ))
 				pass
 
-		return (0.0,0.0)
+		return self.xy_zero
 
 	def setZeroHere(self) :
 		print('Setting zero')
@@ -442,6 +450,7 @@ class ModelaZeroControl:
 		self.z = 0.0
 		self.sendCommand('^DF;!ZO{:.3f};;'.format(self.z_offset)) # set z zero to current
 		self.xy_zero = (self.x,self.y)
+		self.hasZeroBeenSet = True
 		return self.xy_zero
 
 	def moveTo(self,x,y,z,wait=False):
@@ -463,45 +472,40 @@ class ModelaZeroControl:
 			#print(p1,p2)
 			heights = [[(0,0,0) for i in range(steps+1)] for j in range(steps+1)]
 
-			try :
-				for i in range(steps+1) :
-					for j in range(steps+1) :
-						#print(i,j)
-						fx = float(i) / (steps)
-						fy = float(j) / (steps)
-						px = x1 + (x2-x1) * fx
-						py = y1 + (y2-y1) * fy 
-						#print(px,py)
-						#print(i,j,interpolatedPosition)
-						focusValues = []
-						self.moveTo(px,py,startingHeight+5,wait=True)
-						for k in range(heightpoints):
-							h = startingHeight - k * 1.0
-							self.moveTo(px,py,h,wait=False)
-							time.sleep(0.033) # Take some time for focus value to settle
-							focusval = cam.getFocusValue()
-							#print(focusval)
-							focusValues.append( focusval )
+			for i in range(steps+1) :
+				for j in range(steps+1) :
+					#print(i,j)
+					fx = float(i) / (steps)
+					fy = float(j) / (steps)
+					px = x1 + (x2-x1) * fx
+					py = y1 + (y2-y1) * fy 
+					#print(px,py)
+					#print(i,j,interpolatedPosition)
+					focusValues = []
+					self.moveTo(px,py,startingHeight+5,wait=True)
+					for k in range(heightpoints):
+						h = startingHeight - k * 1.0
+						self.moveTo(px,py,h,wait=False)
+						time.sleep(0.033) # Take some time for focus value to settle
+						focusval = cam.getFocusValue()
+						#print(focusval)
+						focusValues.append( focusval )
 
-						#print(focusValues)
-						maxrank = numpy.argmax(focusValues)
+					#print(focusValues)
+					maxrank = numpy.argmax(focusValues)
 
-						self.moveTo(px,py,startingHeight-maxrank*1.0,wait=True)
+					self.moveTo(px,py,startingHeight-maxrank*1.0,wait=True)
 
-						# # TODO: Find max focus height position using curve fit 
-						# poly_rank = 7
-						# focusValues_indexes = range(len(focusValues))
-						# polynomial = numpy.poly1d(numpy.polyfit(focusValues_indexes,focusValues,poly_rank))
-						# numpts = 500
-						# maxrank_high = numpy.argmax(polynomial(numpy.linspace(0, steps, numpts)))
-						# maxrank = ( maxrank_high / (numpts-1) ) * steps
-						# print(px,py,maxrank_high,maxrank)
-						
-						heights[i][j] = ( px,py, maxrank)
-
-			except KeyboardInterrupt :
-				print('Leveling cancelled...')
-				return None
+					# # TODO: Find max focus height position using curve fit 
+					# poly_rank = 7
+					# focusValues_indexes = range(len(focusValues))
+					# polynomial = numpy.poly1d(numpy.polyfit(focusValues_indexes,focusValues,poly_rank))
+					# numpts = 500
+					# maxrank_high = numpy.argmax(polynomial(numpy.linspace(0, steps, numpts)))
+					# maxrank = ( maxrank_high / (numpts-1) ) * steps
+					# print(px,py,maxrank_high,maxrank)
+					
+					heights[i][j] = ( px,py, maxrank)
 
 			# Bias results relative to initial point, at origin
 			(x0,y0,home_rank) = heights[0][0]
@@ -648,7 +652,7 @@ def main():
 
 	try:
 
-		# Manually set zero
+		# Manually set zero and microscope set points
 		x_offset = 0.0
 		y_offset = 0.0
 		modelaZeroControl = None
@@ -657,18 +661,20 @@ def main():
 			if modelaZeroControl.connected or debugmode :
 				print('Setting Zero')
 				(x_offset,y_offset) = modelaZeroControl.run()
-
-				print('Would you like to set the current position as the Zero (y/n)?')
-				c = msvcrt.getwch()
-				if c == 'y' or c == 'Y' :
-					(x_offset,y_offset) = modelaZeroControl.setZeroHere()
+				if modelaZeroControl.exitRequested :
+					print('Terminating program.')
+					sys.exit(1)
 			else :
 				print('Could not connect to the printer to set the zero.')
 
 		# Find bed level using microscope focus
 		levelingData = None
 		if mic != None and mic.isConnected() and modelaZeroControl != None :
-			levelingData = modelaZeroControl.getAutolevelingData(mic)
+			try:
+				levelingData = modelaZeroControl.getAutolevelingData(mic)
+			except KeyboardInterrupt :
+				print('Leveling cancelled, terminating program.')
+				sys.exit(1)
 
 		# gcode to rml conversion
 		if options.infile != '' :
@@ -678,22 +684,25 @@ def main():
 			converter.convertFile( options.infile, options.outfile )
 
 
-
 		# Send RML code to the printer driver.
 		if options.print :
 			if options.outfile != '' :
-				print('Printing: '+options.outfile)
-				os.system('RawFileToPrinter.exe "{}" "{}"'.format(options.outfile,options.printerName)) 
+				print('Are you ready to print (y/n)?')
+				c = msvcrt.getwch()
+				if c == 'y' or c == 'Y' :
+					print('Printing: '+options.outfile)
+					os.system('RawFileToPrinter.exe "{}" "{}"'.format(options.outfile,options.printerName)) 
 
-				print('Procedure to cancel printing:')
-				print('1) Press the VIEW button on the printer.')
-				print('2) Cancel the print job(s) in windows. (start->Devices and Printers->...)')
-				print('3) Remove the usb cable to the printer.')
-				print('4) Press both the UP and Down buttons on the printer.')
-				print('5) When VIEW light stops blinking, press the VIEW butotn.')
-				print('6) Plug the usb cable back in.')
+					print('Procedure to cancel printing:')
+					print('1) Press the VIEW button on the printer.')
+					print('2) Cancel the print job(s) in windows. (start->Devices and Printers->...)')
+					print('3) Remove the usb cable to the printer.')
+					print('4) Press both the UP and Down buttons on the printer.')
+					print('5) When VIEW light stops blinking, press the VIEW butotn.')
+					print('6) Plug the usb cable back in.')
 
 				if mic != None and mic.isConnected() :
+					# Don't exit now if the camera is connected, in case we want visual feedback
 					print('Press any key to exit.')
 					msvcrt.getwch()
 
@@ -705,6 +714,7 @@ def main():
 		#print(e)
 		traceback.print_exc()
 
+	# Release video stream
 	if mic != None :
 		mic.endLoop()
 
