@@ -327,7 +327,7 @@ class ModelaZeroControl:
 		print('\tZ - send to zero')	
 		print('\twasd - move on the XY plane (+shift for small increments)')
 		print('\tup/down - move in the Z axis (+CTRL for medium increments, +ALT for large increments)')
-		print('\t1 - Set Microscope-based levelling starting point')
+		print('\t1 - Set Microscope-based levelling starting point (both points must be set for autolevelling to happen)')
 		print('\t2 - Set Microscope-based levelling ending point')
 		print('\tq - Quit and move to next step.')
 		print('\tCTRL-C / ESC - Exit program.')
@@ -459,7 +459,7 @@ class ModelaZeroControl:
 		self.z = z
 		self.sendMoveCommand(wait)
 
-	def getAutolevelingData(self, cam, steps=2, heightpoints=50) :
+	def getAutolevelingData(self, cam, steps=1, heightpoints=50) :
 		if self.microscope_leveling_startpoint != None and  self.microscope_leveling_endpoint != None :
 			print(self.microscope_leveling_startpoint,self.microscope_leveling_endpoint)
 			(x1,y1,z1) = self.microscope_leveling_startpoint
@@ -619,6 +619,7 @@ def main():
 	parser.add_option('--backlashX', dest='backlashX', default=0.0, help='Backlash compensation in X direction (in steps).')
 	parser.add_option('--backlashY', dest='backlashY', default=0.0, help='Backlash compensation in y direction (in steps).')
 	parser.add_option('--backlashZ', dest='backlashZ', default=0.0, help='Backlash compensation in z direction (in steps).')
+	parser.add_option('--levelingsegments', dest='levelingsegments', default=1, help='Number of segments to split the work area for microscope-based leveling. (Default: 1)')
 	parser.add_option('-m','--microscope', dest='microscope', default=False, help='Enable microscope on channel N')
 	(options,args) = parser.parse_args()
 	#print(options)
@@ -671,7 +672,7 @@ def main():
 		levelingData = None
 		if mic != None and mic.isConnected() and modelaZeroControl != None :
 			try:
-				levelingData = modelaZeroControl.getAutolevelingData(mic)
+				levelingData = modelaZeroControl.getAutolevelingData(mic, steps=int(options.levelingsegments) )
 			except KeyboardInterrupt :
 				print('Leveling cancelled, terminating program.')
 				sys.exit(1)
