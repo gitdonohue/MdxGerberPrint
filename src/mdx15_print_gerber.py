@@ -71,8 +71,9 @@ class GCode2RmlConverter:
 	epsilon = 0.001
 
 	levelingData = None
+	manualLevelingPoints = None
 
-	def __init__(self,offset_x,offset_y,feedspeedfactor,backlashX,backlashY,backlashZ,levelingData):
+	def __init__(self,offset_x,offset_y,feedspeedfactor,backlashX,backlashY,backlashZ,levelingData,manualLevelingPoints):
 		self.moveCommandParseRegex = re.compile(r'G0([01])\s(X([-+]?\d*\.*\d+\s*))?(Y([-+]?\d*\.*\d+\s*))?(Z([-+]?\d*\.*\d+\s*))?')
 		self.offset_x = offset_x
 		self.offset_y = offset_y
@@ -81,6 +82,7 @@ class GCode2RmlConverter:
 		self.backlashY = backlashY
 		self.backlashZ = backlashZ
 		self.levelingData = levelingData
+		self.manualLevelingPoints = manualLevelingPoints
 
 	def digestStream(self, lineIterator):
 		outputCommands = []
@@ -130,6 +132,18 @@ class GCode2RmlConverter:
 			print('Unrecognized command: ' + line)
 			pass
 		return outputCommands
+
+	def getHeightFor3PointPlane( self, p1,p2,p3, x, y ):
+		x1, y1, z1 = p1
+		x2, y2, z2 = p2
+		x3, y3, z3 = p3
+		v1 = [x3 - x1, y3 - y1, z3 - z1]
+		v2 = [x2 - x1, y2 - y1, z2 - z1]
+		cp = [v1[1] * v2[2] - v1[2] * v2[1],  v1[2] * v2[0] - v1[0] * v2[2],  v1[0] * v2[1] - v1[1] * v2[0]]
+		a, b, c = cp
+		d = a * x1 + b * y1 + c * z1
+		z = (d - a * x - b * y) / float(c)
+		return z
 
 	def processMoveCommand(self, line):
 		#print(line)
@@ -182,7 +196,18 @@ class GCode2RmlConverter:
 			#print(px,py,i,j,fx,fy,self.Z,h,h/outputScale)
 			z_correction = -h
 			# Apply compensation to Z
-			#self.Z = self.Z - h/outputScale	
+			#self.Z = self.Z - h/outputScale
+
+		# Manual leveling points	
+		elif self.manualLevelingPoints != None :
+			if len(self.manualLevelingPoints) < 3 :
+				pass # At least 3 points required
+			else :
+				px = self.X*outputScale #+self.offset_x
+				py = self.Y*outputScale #+self.offset_y
+				h = self.getHeightFor3PointPlane( self.manualLevelingPoints[0], self.manualLevelingPoints[1], self.manualLevelingPoints[2], px, py )
+				z_correction = +h
+				pass
 
 		# Backlash handling in X
 		if abs(self.backlashX) > self.epsilon :
@@ -232,6 +257,7 @@ class GCode2RmlConverter:
 			outfile.write('\n')
 			#print(cmd)
 
+
 ##################################################
 
 
@@ -267,6 +293,7 @@ class ModelaZeroControl:
 	exitRequested = False
 
 	xy_zero = (0.0,0.0)
+	manual_leveling_points = None
 
 	def __init__(self,comport):
 		self.comport = comport
@@ -329,6 +356,7 @@ class ModelaZeroControl:
 		print('\tup/down - move in the Z axis (+CTRL for medium increments, +ALT for large increments)')
 		print('\t1 - Set Microscope-based levelling starting point (both points must be set for autolevelling to happen)')
 		print('\t2 - Set Microscope-based levelling ending point')
+		print('\tm - Add manual levelling ending point (wrt zero, which must be set)')
 		print('\tq - Quit and move to next step.')
 		print('\tCTRL-C / ESC - Exit program.')
 
@@ -344,8 +372,9 @@ class ModelaZeroControl:
 		self.xy_zero = (0.0,0.0)
 		
 		while True : #self.connected :
-			c = msvcrt.getwch()
+			c = msvcrt.getwche()
 			n = 0
+			#print(c)
 			if c == '\xe0' or c == '\x00' :
 				c = msvcrt.getwche()
 				n = ord(c)
@@ -415,6 +444,8 @@ class ModelaZeroControl:
 
 			elif c == 'z' and n == 0 :
 				self.setZeroHere()
+			elif c == 'm' and n == 0 :
+				self.setLevelingPointHere()
 
 			elif n == 75 : # left arrow
 				#self.sendCommand('^DF;!MC0;') # disable spindle
@@ -439,7 +470,7 @@ class ModelaZeroControl:
 				self.exitRequested = True
 				return self.xy_zero
 			else :
-				#print( 'you entered: ' + str(n if n != 0 else ord(c) ))
+				print( 'you entered: ' + str(n if n != 0 else ord(c) ))
 				pass
 
 		return self.xy_zero
@@ -451,7 +482,23 @@ class ModelaZeroControl:
 		self.sendCommand('^DF;!ZO{:.3f};;'.format(self.z_offset)) # set z zero to current
 		self.xy_zero = (self.x,self.y)
 		self.hasZeroBeenSet = True
+		if self.manual_leveling_points != None :
+			print('Warning: previously set manual leveling points lost.')
+		self.manual_leveling_points = None
 		return self.xy_zero
+
+	def setLevelingPointHere(self):
+		if not self.hasZeroBeenSet :
+			print('Warning: zero must be set before setting the leveling point. Setting it here.')
+			self.setZeroHere()
+		else :
+			if self.manual_leveling_points == None:
+				self.manual_leveling_points = [ (self.xy_zero[0],self.xy_zero[1],0.0) ]
+			print('Adding leveling point {} ({:.3f},{:.3f},{:.3f})'.format(len(self.manual_leveling_points),self.x,self.y,self.z))
+			self.manual_leveling_points.append( (self.x,self.y,self.z) )
+
+	def getManualLevelingPoints(self):
+		return self.manual_leveling_points
 
 	def moveTo(self,x,y,z,wait=False):
 		self.x = x
@@ -624,7 +671,7 @@ def main():
 	(options,args) = parser.parse_args()
 	#print(options)
 
-	debugmode = True
+	debugmode = False
 
 	# Find serial port number using the printer driver.
 	serialport = ''
@@ -657,11 +704,13 @@ def main():
 		x_offset = 0.0
 		y_offset = 0.0
 		modelaZeroControl = None
+		manualLevelingPoints = None
 		if options.zero :
 			modelaZeroControl = ModelaZeroControl(serialport)
 			if modelaZeroControl.connected or debugmode :
 				print('Setting Zero')
 				(x_offset,y_offset) = modelaZeroControl.run()
+				manualLevelingPoints = modelaZeroControl.getManualLevelingPoints()
 				if modelaZeroControl.exitRequested :
 					print('Terminating program.')
 					sys.exit(1)
@@ -681,7 +730,7 @@ def main():
 		if options.infile != '' :
 			if options.outfile == '' : options.outfile = options.infile + '.prn'
 			print('Converting {} to {}'.format(options.infile,options.outfile))
-			converter = GCode2RmlConverter(x_offset, y_offset, float(options.feedspeedfactor), float(options.backlashX), float(options.backlashY), float(options.backlashZ), levelingData )
+			converter = GCode2RmlConverter(x_offset, y_offset, float(options.feedspeedfactor), float(options.backlashX), float(options.backlashY), float(options.backlashZ), levelingData, manualLevelingPoints )
 			converter.convertFile( options.infile, options.outfile )
 
 
@@ -718,6 +767,7 @@ def main():
 	# Release video stream
 	if mic != None :
 		mic.endLoop()
+
 
 
 if __name__ == "__main__":
